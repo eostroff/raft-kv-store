@@ -1,80 +1,49 @@
-#include <fstream>
+#include <cstdlib>
 #include <iostream>
-#include <sstream>
 #include <string>
 #include <vector>
 
 #include "RaftNode.h"
 
-// Config file format (one line per node):
-//   node_id ip port
-// Example for 3 nodes:
-//   0 127.0.0.1 8000
-//   1 127.0.0.1 8001
-//   2 127.0.0.1 8002
-//
-// On Khoury machines, replace 127.0.0.1 with actual hostnames/IPs.
-
-void PrintUsage(char *argv0) {
-	std::cout << "Usage: " << argv0 << " <node_id> <config_file>" << std::endl;
-	std::cout << std::endl;
-	std::cout << "Config file format (one line per node):" << std::endl;
-	std::cout << "  node_id ip port" << std::endl;
-	std::cout << std::endl;
-	std::cout << "Example config for 3 local nodes:" << std::endl;
-	std::cout << "  0 127.0.0.1 8000" << std::endl;
-	std::cout << "  1 127.0.0.1 8001" << std::endl;
-	std::cout << "  2 127.0.0.1 8002" << std::endl;
-}
-
 int main(int argc, char *argv[]) {
-	if (argc < 3) {
-		PrintUsage(argv[0]);
-		return 1;
-	}
-
-	int my_id = atoi(argv[1]);
-	std::string config_file = argv[2];
-
-	// Parse config file
-	std::ifstream infile(config_file);
-	if (!infile.is_open()) {
-		std::cerr << "ERROR: Could not open config file: " << config_file << std::endl;
-		return 1;
-	}
-
-	int my_port = -1;
+	int my_port;
+	int my_id;
+	int num_peers;
 	std::vector<PeerInfo> peers;
-	std::string line;
 
-	while (std::getline(infile, line)) {
-		if (line.empty() || line[0] == '#') continue;
-
-		std::istringstream iss(line);
-		int id;
-		std::string ip;
-		int port;
-
-		if (!(iss >> id >> ip >> port)) {
-			std::cerr << "WARNING: Skipping malformed config line: " << line << std::endl;
-			continue;
-		}
-
-		if (id == my_id) {
-			my_port = port;
-		} else {
-			PeerInfo peer;
-			peer.id = id;
-			peer.ip = ip;
-			peer.port = port;
-			peers.push_back(peer);
-		}
-	}
-	infile.close();
-
-	if (my_port < 0) {
-		std::cerr << "ERROR: Node id " << my_id << " not found in config file" << std::endl;
+	if (argc < 4) {
+		std::cout << "not enough arguments" << std::endl;
+        std::cout << argv[0] << " [port #] [node id] [num peers] [peer1_id peer1_ip peer1_port] ..." << std::endl;
 		return 1;
+	}
+
+	my_port = atoi(argv[1]);
+	my_id = atoi(argv[2]);
+	num_peers = atoi(argv[3]);
+
+	if (argc != 4 + (num_peers * 3)) {
+		std::cerr << "argument error for peer list" << std::endl;
+		return 1;
+	}
+
+	for (int i = 0; i < num_peers; i++) {
+		int base = 4 + (i * 3);
+		PeerInfo peer;
+		peer.id = atoi(argv[base]);
+		peer.ip = argv[base + 1];
+		peer.port = atoi(argv[base + 2]);
+
+		if (peer.id == my_id) {
+			std::cerr << "ERROR: Peer id " << peer.id << " matches local node_id" << std::endl;
+			return 1;
+		}
+		if (peer.port <= 0) {
+			std::cerr << "ERROR: Peer port must be a positive integer for peer id "
+				<< peer.id << std::endl;
+			return 1;
+		}
+
+		peers.push_back(peer);
 	}
 
 	std::cout << "=== Raft Node " << my_id << " ===" << std::endl;

@@ -11,7 +11,7 @@ Current codebase status: **Progress Report 1 (PR1)** level functionality.
 - `RequestVote` and `RequestVoteReply` RPCs
 - Leader heartbeats via `AppendEntries` (empty entries)
 - Term update/demotion behavior when higher term is discovered
-- Multi-node configuration file parsing
+- Manual peer configuration via command-line arguments
 - Multi-threaded listener, election timer, and heartbeat loops
 
 ## What is not implemented yet
@@ -71,48 +71,45 @@ make clean
 make debug
 ```
 
-## Cluster configuration file
+## Server startup format
 
-Each server reads a shared config file with one node per line:
-
-```text
-node_id ip port
-```
-
-Example (`cluster.conf`):
+Each server is started with explicit peer information:
 
 ```text
-0 127.0.0.1 8000
-1 127.0.0.1 8001
-2 127.0.0.1 8002
+./server <my_port> <node_id> <num_peers> [<peer_id> <peer_ip> <peer_port> ...]
 ```
 
-Notes:
+This is intended for manually launching nodes on different machines (for example via SSH), without any shared config file.
 
-- Lines beginning with `#` are ignored.
-- Blank lines are ignored.
-- Each node must have a unique `node_id` and `port`.
+`num_peers` must match the number of peer triples provided.
 
-## Running a 3-node local cluster
+## Running a 3-node cluster (manual, multi-machine friendly)
 
-From the `src/` directory, open 3 terminals:
+Example with three machines:
 
-Terminal 1:
+- Node 0 on `10.0.0.10`, port `8000`
+- Node 1 on `10.0.0.11`, port `8001`
+- Node 2 on `10.0.0.12`, port `8002`
+
+Run on machine A:
 
 ```bash
-./server 0 ../cluster.conf
+cd src
+./server 8000 0 2 1 10.0.0.11 8001 2 10.0.0.12 8002
 ```
 
-Terminal 2:
+Run on machine B:
 
 ```bash
-./server 1 ../cluster.conf
+cd src
+./server 8001 1 2 0 10.0.0.10 8000 2 10.0.0.12 8002
 ```
 
-Terminal 3:
+Run on machine C:
 
 ```bash
-./server 2 ../cluster.conf
+cd src
+./server 8002 2 2 0 10.0.0.10 8000 1 10.0.0.11 8001
 ```
 
 You should see:
@@ -145,11 +142,14 @@ Current behavior:
 
 ## Troubleshooting
 
-- `ERROR: Could not open config file`: verify path passed to `server`.
-- `Node id X not found in config file`: ensure the node id exists in the config.
+- `ERROR: my_port must be a positive integer`: check local port argument.
+- `ERROR: num_peers must be non-negative`: check peer count argument.
+- `ERROR: argument error(s) for peer list`: verify that `num_peers` matches provided triples.
+- `ERROR: Peer id X matches local node_id`: remove local id from peer list.
+- `ERROR: Peer port must be a positive integer`: check each peer triple.
 - Frequent election churn: confirm all nodes are running concurrently.
-- Frequent election churn: confirm all ports in config are reachable and not occupied.
-- Frequent election churn: verify every node uses the same config content.
+- Frequent election churn: confirm all declared peer ports are reachable and not occupied.
+- Frequent election churn: verify every node uses a consistent peer map.
 
 ## Development notes
 

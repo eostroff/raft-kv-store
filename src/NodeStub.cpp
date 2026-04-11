@@ -1,5 +1,7 @@
 #include "NodeStub.h"
 
+#include <vector>
+
 NodeStub::NodeStub() {}
 
 void NodeStub::Init(std::unique_ptr<ListenSocket> socket) {
@@ -16,60 +18,70 @@ int NodeStub::ReceiveRPCType() {
 
 RequestVote NodeStub::ReceiveRequestVote() {
 	RequestVote rv;
-	char buffer[64];
-	if (socket->Recv(buffer, rv.Size(), 0)) {
-		rv.Unmarshal(buffer);
+	std::vector<char> buffer(rv.Size());
+	if (socket->Recv(buffer.data(), rv.Size(), 0)) {
+		rv.Unmarshal(buffer.data());
 	}
 	return rv;
 }
 
 AppendEntries NodeStub::ReceiveAppendEntries() {
 	AppendEntries ae;
-	char buffer[64];
-	if (socket->Recv(buffer, ae.Size(), 0)) {
-		ae.Unmarshal(buffer);
+	std::vector<char> header(AppendEntries::HeaderSize());
+	if (!socket->Recv(header.data(), AppendEntries::HeaderSize(), MSG_PEEK)) {
+		return ae;
+	}
+
+	int total_size = AppendEntries::ReadTotalSizeFromHeader(header.data());
+	if (total_size <= 0) {
+		return ae;
+	}
+
+	std::vector<char> buffer(total_size);
+	if (socket->Recv(buffer.data(), total_size, 0)) {
+		ae.Unmarshal(buffer.data());
 	}
 	return ae;
 }
 
 int NodeStub::SendRequestVoteReply(RequestVoteReply reply) {
-	char buffer[64];
-	reply.Marshal(buffer);
-	return socket->Send(buffer, reply.Size(), 0);
+	std::vector<char> buffer(reply.Size());
+	reply.Marshal(buffer.data());
+	return socket->Send(buffer.data(), reply.Size(), 0);
 }
 
 int NodeStub::SendAppendEntriesReply(AppendEntriesReply reply) {
-	char buffer[64];
-	reply.Marshal(buffer);
-	return socket->Send(buffer, reply.Size(), 0);
+	std::vector<char> buffer(reply.Size());
+	reply.Marshal(buffer.data());
+	return socket->Send(buffer.data(), reply.Size(), 0);
 }
 
 int NodeStub::SendRequestVote(RequestVote req) {
-	char buffer[64];
-	req.Marshal(buffer);
-	return socket->Send(buffer, req.Size(), 0);
+	std::vector<char> buffer(req.Size());
+	req.Marshal(buffer.data());
+	return socket->Send(buffer.data(), req.Size(), 0);
 }
 
 int NodeStub::SendAppendEntries(AppendEntries ae) {
-	char buffer[64];
-	ae.Marshal(buffer);
-	return socket->Send(buffer, ae.Size(), 0);
+	std::vector<char> buffer(ae.Size());
+	ae.Marshal(buffer.data());
+	return socket->Send(buffer.data(), ae.Size(), 0);
 }
 
 RequestVoteReply NodeStub::ReceiveRequestVoteReply() {
 	RequestVoteReply reply;
-	char buffer[64];
-	if (socket->Recv(buffer, reply.Size(), 0)) {
-		reply.Unmarshal(buffer);
+	std::vector<char> buffer(reply.Size());
+	if (socket->Recv(buffer.data(), reply.Size(), 0)) {
+		reply.Unmarshal(buffer.data());
 	}
 	return reply;
 }
 
 AppendEntriesReply NodeStub::ReceiveAppendEntriesReply() {
 	AppendEntriesReply reply;
-	char buffer[64];
-	if (socket->Recv(buffer, reply.Size(), 0)) {
-		reply.Unmarshal(buffer);
+	std::vector<char> buffer(reply.Size());
+	if (socket->Recv(buffer.data(), reply.Size(), 0)) {
+		reply.Unmarshal(buffer.data());
 	}
 	return reply;
 }

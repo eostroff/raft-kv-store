@@ -1,5 +1,7 @@
 #include "RaftStub.h"
 
+#include <vector>
+
 RaftStub::RaftStub() {}
 
 int RaftStub::Init(std::string ip, int port) {
@@ -8,11 +10,12 @@ int RaftStub::Init(std::string ip, int port) {
 
 RequestVoteReply RaftStub::SendRequestVote(RequestVote req) {
 	RequestVoteReply reply;
-	char buffer[64];
-	req.Marshal(buffer);
-	if (socket.Send(buffer, req.Size(), 0)) {
-		if (socket.Recv(buffer, reply.Size(), 0)) {
-			reply.Unmarshal(buffer);
+	std::vector<char> req_buffer(req.Size());
+	req.Marshal(req_buffer.data());
+	if (socket.Send(req_buffer.data(), req.Size(), 0)) {
+		std::vector<char> reply_buffer(reply.Size());
+		if (socket.Recv(reply_buffer.data(), reply.Size(), 0)) {
+			reply.Unmarshal(reply_buffer.data());
 		}
 	}
 	return reply;
@@ -20,11 +23,12 @@ RequestVoteReply RaftStub::SendRequestVote(RequestVote req) {
 
 AppendEntriesReply RaftStub::SendAppendEntries(AppendEntries ae) {
 	AppendEntriesReply reply;
-	char buffer[64];
-	ae.Marshal(buffer);
-	if (socket.Send(buffer, ae.Size(), 0)) {
-		if (socket.Recv(buffer, reply.Size(), 0)) {
-			reply.Unmarshal(buffer);
+	std::vector<char> req_buffer(ae.Size());
+	ae.Marshal(req_buffer.data());
+	if (socket.Send(req_buffer.data(), ae.Size(), 0)) {
+		std::vector<char> reply_buffer(reply.Size());
+		if (socket.Recv(reply_buffer.data(), reply.Size(), 0)) {
+			reply.Unmarshal(reply_buffer.data());
 		}
 	}
 	return reply;

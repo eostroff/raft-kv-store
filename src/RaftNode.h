@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "Messages.h"
+#include "LogManager.h"
 #include "ListenSocket.h"
 #include "NodeStub.h"
 #include "RaftStub.h"
@@ -37,11 +38,18 @@ private:
 	// ---- Persistent Raft state ----
 	int current_term;
 	int voted_for;       // -1 if none
-	// Log will be added in progress report 2
+	LogManager log_manager;
 
 	// ---- Volatile state ----
 	NodeState state;
 	int leader_id;       // -1 if unknown
+	int commit_index;
+	int last_applied;
+
+	// ---- Leader state (re-initialized on election) ----
+	std::vector<int> next_index;
+	std::vector<int> match_index;
+	int next_command_id;
 
 	// ---- Synchronization ----
 	std::mutex mu;
@@ -84,6 +92,7 @@ private:
 	void StartElection();
 	void BecomeFollower(int term);
 	void BecomeLeader();
+	void MaybeAdvanceCommitIndex();
 
 	// Helper: get state as string for logging
 	std::string StateStr();

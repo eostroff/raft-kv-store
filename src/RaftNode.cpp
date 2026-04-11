@@ -11,6 +11,8 @@ RaftNode::RaftNode(int id, int port, std::vector<PeerInfo> peers)
 	: node_id(id), port(port), peers(peers),
 	  current_term(0), voted_for(-1),
 	  state(FOLLOWER), leader_id(-1),
+	  commit_index(0), last_applied(0),
+	  next_command_id(1),
 	  running(false),
 	  rng(std::random_device{}() + id) // seed with id for uniqueness
 {
@@ -172,12 +174,19 @@ void RaftNode::HandleRequestVote(NodeStub &stub, RequestVote &rv) {
 		grant = 0;
 	} else if (voted_for == -1 || voted_for == rv.GetCandidateId()) {
 		// Haven't voted yet this term (or already voted for this candidate)
-		// Log up-to-date check (simplified for progress report 1 - no log yet)
-		grant = 1;
-		voted_for = rv.GetCandidateId();
-		ResetElectionTimer();
-		std::cout << "[Node " << node_id << "] Voted for node " << rv.GetCandidateId()
-			<< " in term " << current_term << std::endl;
+		int my_last_term = log_manager.LastTerm();
+		int my_last_index = log_manager.LastIndex();
+		bool candidate_up_to_date =
+			(rv.GetLastLogTerm() > my_last_term) ||
+			(rv.GetLastLogTerm() == my_last_term && rv.GetLastLogIndex() >= my_last_index);
+
+		if (candidate_up_to_date) {
+			grant = 1;
+			voted_for = rv.GetCandidateId();
+			ResetElectionTimer();
+			std::cout << "[Node " << node_id << "] Voted for node " << rv.GetCandidateId()
+				<< " in term " << current_term << std::endl;
+		}
 	}
 
 	reply.SetReply(current_term, grant, node_id);
@@ -190,20 +199,23 @@ void RaftNode::HandleAppendEntries(NodeStub &stub, AppendEntries &ae) {
 	AppendEntriesReply reply;
 	int success = 0;
 
-	if (ae.GetTerm() >= current_term) {
-		// Valid leader heartbeat
+	if (ae.GetTerm() < current_term) {
+		success = 0;
+	} else {
 		if (ae.GetTerm() > current_term) {
-			current_term = ae.GetTerm();
-			voted_for = -1;
+			BecomeFollower(ae.GetTerm());
 		}
 		state = FOLLOWER;
 		leader_id = ae.GetLeaderId();
 		ResetElectionTimer();
-		success = 1;
 
-		// Log replication will be handled in progress report 2
+		success = log_manager.AppendFromLeader(
+			ae.GetPrevLogIndex(), ae.GetPrevLogTerm(), ae.GetEntries()) ? 1 : 0;
+
+		if (success && ae.GetLeaderCommit() > commit_index) {
+			commit_index = std::min(ae.GetLeaderCommit(), log_manager.LastIndex());
+		}
 	}
-	// If ae.GetTerm() < current_term, reject (success stays 0)
 
 	reply.SetReply(current_term, success, node_id);
 	stub.SendAppendEntriesReply(reply);
@@ -221,6 +233,8 @@ void RaftNode::StartElection() {
 	current_term++;
 	voted_for = node_id;
 	int election_term = current_term;
+	int last_log_index = log_manager.LastIndex();
+	int last_log_term = log_manager.LastTerm();
 	ResetElectionTimer();
 
 	std::cout << "[Node " << node_id << "] Starting election for term " << election_term << std::endl;
@@ -233,7 +247,6 @@ void RaftNode::StartElection() {
 
 	// Send RequestVote RPCs to all peers in parallel
 	std::vector<std::thread> vote_threads;
-	std::mutex vote_mu;
 
 	for (auto &peer : peers) {
 		vote_threads.emplace_back([&, peer]() {
@@ -245,14 +258,13 @@ void RaftNode::StartElection() {
 			}
 
 			RequestVote rv;
-			rv.SetRequest(election_term, node_id, 0, 0); // last_log_index/term = 0 for now
+			rv.SetRequest(election_term, node_id, last_log_index, last_log_term);
 
 			RequestVoteReply reply = stub.SendRequestVote(rv);
 			stub.Close();
 
 			if (!reply.IsValid()) return;
 
-			std::lock_guard<std::mutex> vlock(vote_mu);
 			std::lock_guard<std::mutex> nlock(mu);
 
 			// Check if we're still a candidate in the same term
@@ -289,6 +301,8 @@ void RaftNode::BecomeFollower(int term) {
 	state = FOLLOWER;
 	voted_for = -1;
 	leader_id = -1;
+	next_index.clear();
+	match_index.clear();
 	ResetElectionTimer();
 }
 
@@ -296,17 +310,43 @@ void RaftNode::BecomeLeader() {
 	// Caller must hold mu
 	state = LEADER;
 	leader_id = node_id;
+	int last_index = log_manager.LastIndex();
+	next_index.assign(peers.size(), last_index + 1);
+	match_index.assign(peers.size(), 0);
+
+	int noop_index = log_manager.Append(current_term, next_command_id++);
+	std::cout << "[Node " << node_id << "] Appended leader no-op at index "
+		<< noop_index << " term " << current_term << std::endl;
+
 	std::cout << "========================================" << std::endl;
 	std::cout << "[Node " << node_id << "] BECAME LEADER for term " << current_term << std::endl;
 	std::cout << "========================================" << std::endl;
 
-	// Start heartbeat thread (detached - will check running flag)
+	// Start heartbeat thread
 	if (heartbeat_thread.joinable()) {
-		// Previous heartbeat thread from a prior leadership - it should have
-		// stopped when we lost leadership. We detach to avoid blocking.
-		heartbeat_thread.detach();
+		heartbeat_thread.join();
 	}
 	heartbeat_thread = std::thread(&RaftNode::HeartbeatThread, this);
+}
+
+void RaftNode::MaybeAdvanceCommitIndex() {
+	int total_nodes = (int)peers.size() + 1;
+	int majority = total_nodes / 2 + 1;
+	for (int idx = log_manager.LastIndex(); idx > commit_index; --idx) {
+		if (log_manager.TermAt(idx) != current_term) {
+			continue;
+		}
+		int replicated = 1;
+		for (int m : match_index) {
+			if (m >= idx) {
+				replicated++;
+			}
+		}
+		if (replicated >= majority) {
+			commit_index = idx;
+			return;
+		}
+	}
 }
 
 // ============================================================
@@ -333,24 +373,61 @@ void RaftNode::HeartbeatThread() {
 		}
 
 		std::vector<std::thread> hb_threads;
-		for (auto &peer : peers) {
-			hb_threads.emplace_back([&, peer, my_term]() {
+		for (size_t i = 0; i < peers.size(); ++i) {
+			PeerInfo peer = peers[i];
+			hb_threads.emplace_back([&, i, peer, my_term]() {
+				int peer_next_index;
+				int prev_log_index;
+				int prev_log_term;
+				int leader_commit_snapshot;
+				std::vector<LogEntry> entries_to_send;
+
+				{
+					std::lock_guard<std::mutex> lock(mu);
+					if (state != LEADER || current_term != my_term) {
+						return;
+					}
+
+					peer_next_index = next_index[i];
+					prev_log_index = peer_next_index - 1;
+					prev_log_term = log_manager.TermAt(prev_log_index);
+					leader_commit_snapshot = commit_index;
+					entries_to_send = log_manager.EntriesFrom(peer_next_index);
+				}
+
 				RaftStub stub;
 				if (!stub.Init(peer.ip, peer.port)) {
 					return;
 				}
 
 				AppendEntries ae;
-				ae.SetEntries(my_term, node_id, 0, 0, 0, 0); // heartbeat: 0 entries
+				ae.SetEntries(my_term, node_id, prev_log_index, prev_log_term,
+					leader_commit_snapshot, entries_to_send);
 
 				AppendEntriesReply reply = stub.SendAppendEntries(ae);
 				stub.Close();
 
-				if (reply.IsValid() && reply.GetTerm() > my_term) {
-					std::lock_guard<std::mutex> lock(mu);
-					if (reply.GetTerm() > current_term) {
-						BecomeFollower(reply.GetTerm());
-					}
+				if (!reply.IsValid()) {
+					return;
+				}
+
+				std::lock_guard<std::mutex> lock(mu);
+				if (state != LEADER || current_term != my_term) {
+					return;
+				}
+
+				if (reply.GetTerm() > current_term) {
+					BecomeFollower(reply.GetTerm());
+					return;
+				}
+
+				if (reply.GetSuccess()) {
+					int replicated_to = prev_log_index + (int)entries_to_send.size();
+					match_index[i] = replicated_to;
+					next_index[i] = replicated_to + 1;
+					MaybeAdvanceCommitIndex();
+				} else if (next_index[i] > 1) {
+					next_index[i]--;
 				}
 			});
 		}

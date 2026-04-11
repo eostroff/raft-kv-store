@@ -152,19 +152,34 @@ AppendEntries::AppendEntries() {
 	entry_count = 0;
 }
 
-void AppendEntries::SetEntries(int t, int lid, int pli, int plt, int lc, int ec) {
+void AppendEntries::SetEntries(int t, int lid, int pli, int plt, int lc,
+	const std::vector<LogEntry> &new_entries) {
 	term = t;
 	leader_id = lid;
 	prev_log_index = pli;
 	prev_log_term = plt;
 	leader_commit = lc;
-	entry_count = ec;
+	entries = new_entries;
+	entry_count = (int)entries.size();
+}
+
+int AppendEntries::HeaderSize() {
+	return (int)(7 * sizeof(int));
+}
+
+int AppendEntries::ReadTotalSizeFromHeader(char *header) {
+	int net_entry_count;
+	int offset = (int)(6 * sizeof(int));
+	memcpy(&net_entry_count, header + offset, sizeof(net_entry_count));
+	int parsed_entry_count = ntohl(net_entry_count);
+	if (parsed_entry_count < 0) {
+		return -1;
+	}
+	return HeaderSize() + parsed_entry_count * (int)(2 * sizeof(int));
 }
 
 int AppendEntries::Size() {
-	return sizeof(rpc_type) + sizeof(term) + sizeof(leader_id)
-		+ sizeof(prev_log_index) + sizeof(prev_log_term)
-		+ sizeof(leader_commit) + sizeof(entry_count);
+	return HeaderSize() + entry_count * (int)(2 * sizeof(int));
 }
 
 void AppendEntries::Marshal(char *buffer) {
@@ -189,6 +204,16 @@ void AppendEntries::Marshal(char *buffer) {
 	memcpy(buffer + offset, &net_leader_commit, sizeof(net_leader_commit));
 	offset += sizeof(net_leader_commit);
 	memcpy(buffer + offset, &net_entry_count, sizeof(net_entry_count));
+	offset += sizeof(net_entry_count);
+
+	for (int i = 0; i < entry_count; ++i) {
+		int net_entry_term = htonl(entries[i].term);
+		int net_entry_command = htonl(entries[i].command);
+		memcpy(buffer + offset, &net_entry_term, sizeof(net_entry_term));
+		offset += sizeof(net_entry_term);
+		memcpy(buffer + offset, &net_entry_command, sizeof(net_entry_command));
+		offset += sizeof(net_entry_command);
+	}
 }
 
 void AppendEntries::Unmarshal(char *buffer) {
@@ -213,6 +238,7 @@ void AppendEntries::Unmarshal(char *buffer) {
 	memcpy(&net_leader_commit, buffer + offset, sizeof(net_leader_commit));
 	offset += sizeof(net_leader_commit);
 	memcpy(&net_entry_count, buffer + offset, sizeof(net_entry_count));
+	offset += sizeof(net_entry_count);
 
 	rpc_type = ntohl(net_rpc_type);
 	term = ntohl(net_term);
@@ -221,6 +247,20 @@ void AppendEntries::Unmarshal(char *buffer) {
 	prev_log_term = ntohl(net_prev_log_term);
 	leader_commit = ntohl(net_leader_commit);
 	entry_count = ntohl(net_entry_count);
+
+	entries.clear();
+	for (int i = 0; i < entry_count; ++i) {
+		int net_entry_term;
+		int net_entry_command;
+		memcpy(&net_entry_term, buffer + offset, sizeof(net_entry_term));
+		offset += sizeof(net_entry_term);
+		memcpy(&net_entry_command, buffer + offset, sizeof(net_entry_command));
+		offset += sizeof(net_entry_command);
+		LogEntry e;
+		e.term = ntohl(net_entry_term);
+		e.command = ntohl(net_entry_command);
+		entries.push_back(e);
+	}
 }
 
 bool AppendEntries::IsValid() {

@@ -2,8 +2,11 @@
 #define __MESSAGES_H__
 
 #include <string>
+#include <vector>
 #include <cstring>
 #include <arpa/inet.h>
+
+#include "LogManager.h"
 
 // RPC type identifiers
 enum RPCType {
@@ -73,12 +76,12 @@ private:
 	int prev_log_term;   // term of prev_log_index entry
 	int leader_commit;   // leader's commit index
 	int entry_count;     // number of entries (0 for heartbeat)
-	// For progress report 1, we only send heartbeats (entry_count = 0)
-	// Log entries will be added in progress report 2
+	std::vector<LogEntry> entries;
 
 public:
 	AppendEntries();
-	void SetEntries(int t, int lid, int pli, int plt, int lc, int ec);
+	void SetEntries(int t, int lid, int pli, int plt, int lc,
+		const std::vector<LogEntry> &new_entries);
 
 	int GetRPCType()       { return rpc_type; }
 	int GetTerm()          { return term; }
@@ -87,6 +90,10 @@ public:
 	int GetPrevLogTerm()   { return prev_log_term; }
 	int GetLeaderCommit()  { return leader_commit; }
 	int GetEntryCount()    { return entry_count; }
+	const std::vector<LogEntry> &GetEntries() const { return entries; }
+
+	static int HeaderSize();
+	static int ReadTotalSizeFromHeader(char *header);
 
 	int Size();
 	void Marshal(char *buffer);

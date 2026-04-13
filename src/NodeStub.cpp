@@ -44,6 +44,25 @@ AppendEntries NodeStub::ReceiveAppendEntries() {
 	return ae;
 }
 
+ClientCommand NodeStub::ReceiveClientCommand() {
+	ClientCommand cmd;
+	std::vector<char> header(ClientCommand::HeaderSize());
+	if (!socket->Recv(header.data(), ClientCommand::HeaderSize(), MSG_PEEK)) {
+		return cmd;
+	}
+
+	int total_size = ClientCommand::ReadTotalSizeFromHeader(header.data());
+	if (total_size <= 0) {
+		return cmd;
+	}
+
+	std::vector<char> buffer(total_size);
+	if (socket->Recv(buffer.data(), total_size, 0)) {
+		cmd.Unmarshal(buffer.data());
+	}
+	return cmd;
+}
+
 int NodeStub::SendRequestVoteReply(RequestVoteReply reply) {
 	std::vector<char> buffer(reply.Size());
 	reply.Marshal(buffer.data());
@@ -51,6 +70,12 @@ int NodeStub::SendRequestVoteReply(RequestVoteReply reply) {
 }
 
 int NodeStub::SendAppendEntriesReply(AppendEntriesReply reply) {
+	std::vector<char> buffer(reply.Size());
+	reply.Marshal(buffer.data());
+	return socket->Send(buffer.data(), reply.Size(), 0);
+}
+
+int NodeStub::SendClientReply(ClientReply reply) {
 	std::vector<char> buffer(reply.Size());
 	reply.Marshal(buffer.data());
 	return socket->Send(buffer.data(), reply.Size(), 0);
@@ -81,6 +106,25 @@ AppendEntriesReply NodeStub::ReceiveAppendEntriesReply() {
 	AppendEntriesReply reply;
 	std::vector<char> buffer(reply.Size());
 	if (socket->Recv(buffer.data(), reply.Size(), 0)) {
+		reply.Unmarshal(buffer.data());
+	}
+	return reply;
+}
+
+ClientReply NodeStub::ReceiveClientReply() {
+	ClientReply reply;
+	std::vector<char> header(ClientReply::HeaderSize());
+	if (!socket->Recv(header.data(), ClientReply::HeaderSize(), MSG_PEEK)) {
+		return reply;
+	}
+
+	int total_size = ClientReply::ReadTotalSizeFromHeader(header.data());
+	if (total_size <= 0) {
+		return reply;
+	}
+
+	std::vector<char> buffer(total_size);
+	if (socket->Recv(buffer.data(), total_size, 0)) {
 		reply.Unmarshal(buffer.data());
 	}
 	return reply;

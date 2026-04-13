@@ -18,10 +18,12 @@ public:
 	// Receive specific messages (call after peeking the type)
 	RequestVote ReceiveRequestVote();
 	AppendEntries ReceiveAppendEntries();
+	ClientCommand ReceiveClientCommand();
 
 	// Send replies
 	int SendRequestVoteReply(RequestVoteReply reply);
 	int SendAppendEntriesReply(AppendEntriesReply reply);
+	int SendClientReply(ClientReply reply);
 
 	// Send requests (used by leader/candidate through peer connections)
 	int SendRequestVote(RequestVote req);
@@ -30,6 +32,7 @@ public:
 	// Receive replies
 	RequestVoteReply ReceiveRequestVoteReply();
 	AppendEntriesReply ReceiveAppendEntriesReply();
+	ClientReply ReceiveClientReply();
 
 	bool IsValid();
 	void Close();

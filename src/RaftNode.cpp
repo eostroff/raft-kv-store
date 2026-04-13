@@ -314,6 +314,8 @@ void RaftNode::StartElection() {
 		vote_threads.emplace_back([&, peer]() {
 			RaftStub stub;
 			if (!stub.Init(peer.ip, peer.port)) {
+				// std::cerr << "[Node " << node_id << "] Failed to connect to peer "
+				// 	<< peer.id << " at " << peer.ip << ":" << peer.port << std::endl;
 				return;
 			}
 

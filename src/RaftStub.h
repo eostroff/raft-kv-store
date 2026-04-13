@@ -15,6 +15,7 @@ public:
 	// Send RPCs and receive replies
 	RequestVoteReply SendRequestVote(RequestVote req);
 	AppendEntriesReply SendAppendEntries(AppendEntries ae);
+	ClientReply SendClientCommand(ClientCommand cmd);
 
 	void Close();
 };

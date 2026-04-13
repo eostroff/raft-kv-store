@@ -34,6 +34,31 @@ AppendEntriesReply RaftStub::SendAppendEntries(AppendEntries ae) {
 	return reply;
 }
 
+ClientReply RaftStub::SendClientCommand(ClientCommand cmd) {
+	ClientReply reply;
+	std::vector<char> req_buffer(cmd.Size());
+	cmd.Marshal(req_buffer.data());
+	if (!socket.Send(req_buffer.data(), cmd.Size(), 0)) {
+		return reply;
+	}
+
+	std::vector<char> header(ClientReply::HeaderSize());
+	if (!socket.Recv(header.data(), ClientReply::HeaderSize(), MSG_PEEK)) {
+		return reply;
+	}
+
+	int total_size = ClientReply::ReadTotalSizeFromHeader(header.data());
+	if (total_size <= 0) {
+		return reply;
+	}
+
+	std::vector<char> reply_buffer(total_size);
+	if (socket.Recv(reply_buffer.data(), total_size, 0)) {
+		reply.Unmarshal(reply_buffer.data());
+	}
+	return reply;
+}
+
 void RaftStub::Close() {
 	socket.Close();
 }

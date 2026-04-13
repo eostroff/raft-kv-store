@@ -13,7 +13,22 @@ enum RPCType {
 	RPC_REQUEST_VOTE = 1,
 	RPC_REQUEST_VOTE_REPLY = 2,
 	RPC_APPEND_ENTRIES = 3,
-	RPC_APPEND_ENTRIES_REPLY = 4
+	RPC_APPEND_ENTRIES_REPLY = 4,
+	RPC_CLIENT_COMMAND = 5,
+	RPC_CLIENT_REPLY = 6
+};
+
+enum ClientOpType {
+	CLIENT_OP_GET = 1,
+	CLIENT_OP_PUT = 2,
+	CLIENT_OP_DELETE = 3
+};
+
+enum ClientStatus {
+	CLIENT_STATUS_OK = 1,
+	CLIENT_STATUS_NOT_FOUND = 2,
+	CLIENT_STATUS_NOT_LEADER = 3,
+	CLIENT_STATUS_ERROR = 4
 };
 
 // Sent by candidates to request votes during election
@@ -118,6 +133,63 @@ public:
 	int GetTerm()    { return term; }
 	int GetSuccess() { return success; }
 	int GetNodeId()  { return node_id; }
+
+	int Size();
+	void Marshal(char *buffer);
+	void Unmarshal(char *buffer);
+	bool IsValid();
+	void Print();
+};
+
+class ClientCommand {
+private:
+	int rpc_type;
+	int op;
+	std::string key;
+	std::string value;
+
+public:
+	ClientCommand();
+	void SetCommand(int op, const std::string &key, const std::string &value);
+
+	int GetRPCType()      { return rpc_type; }
+	int GetOp()           { return op; }
+	const std::string &GetKey() const   { return key; }
+	const std::string &GetValue() const { return value; }
+
+	static int HeaderSize();
+	static int ReadTotalSizeFromHeader(char *header);
+
+	int Size();
+	void Marshal(char *buffer);
+	void Unmarshal(char *buffer);
+	bool IsValid();
+	void Print();
+};
+
+class ClientReply {
+private:
+	int rpc_type;
+	int status;
+	int leader_port;
+	std::string leader_ip;
+	std::string value;
+	std::string message;
+
+public:
+	ClientReply();
+	void SetReply(int status, int leader_port, const std::string &leader_ip,
+		const std::string &value, const std::string &message);
+
+	int GetRPCType()      { return rpc_type; }
+	int GetStatus()       { return status; }
+	int GetLeaderPort()   { return leader_port; }
+	const std::string &GetLeaderIP() const { return leader_ip; }
+	const std::string &GetValue() const    { return value; }
+	const std::string &GetMessage() const  { return message; }
+
+	static int HeaderSize();
+	static int ReadTotalSizeFromHeader(char *header);
 
 	int Size();
 	void Marshal(char *buffer);

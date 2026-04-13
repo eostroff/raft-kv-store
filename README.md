@@ -2,26 +2,26 @@
 
 A C++ implementation of the core Raft consensus election/heartbeat flow, structured as a distributed key-value store project.
 
-Current codebase status: **Progress Report 1 (PR1)** level functionality.
+Current codebase status: **Progress Report 2 (PR2)** level functionality.
 
 ## What is implemented
 
 - Raft node states: `FOLLOWER`, `CANDIDATE`, `LEADER`
 - Randomized election timeout and leader election
 - `RequestVote` and `RequestVoteReply` RPCs
-- Leader heartbeats via `AppendEntries` (empty entries)
+- Leader heartbeats via `AppendEntries`
+- Log replication with conflict resolution and follower catch-up
+- In-memory key-value state machine application on commit
+- Client command protocol for `GET`, `PUT`, and `DELETE`
+- Leader redirection replies for client writes sent to followers
 - Term update/demotion behavior when higher term is discovered
 - Manual peer configuration via command-line arguments
 - Multi-threaded listener, election timer, and heartbeat loops
 
 ## What is not implemented yet
 
-- Replicated log entries
-- Commit index / apply-to-state-machine logic
-- Key-value `GET/PUT/DELETE` operations
-- Full client interaction with leader redirection and retries
-
-The `client` binary currently prints a placeholder message and does not issue KV commands.
+- Durable persistence across process restarts (state is in-memory)
+- Automated integration/performance test harness
 
 ## Repository layout
 

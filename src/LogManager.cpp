@@ -33,8 +33,9 @@ bool LogManager::HasMatchingEntry(int index, int term) const {
 	return entries[index - 1].term == term;
 }
 
-int LogManager::Append(int term, int command) {
-	entries.push_back({term, command});
+int LogManager::Append(int term, int command, const std::string &key,
+	const std::string &value) {
+	entries.push_back({term, command, key, value});
 	return (int)entries.size();
 }
 
@@ -47,6 +48,14 @@ std::vector<LogEntry> LogManager::EntriesFrom(int start_index) const {
 		out.push_back(entries[i]);
 	}
 	return out;
+}
+
+bool LogManager::GetEntry(int index, LogEntry &entry) const {
+	if (index <= 0 || index > (int)entries.size()) {
+		return false;
+	}
+	entry = entries[index - 1];
+	return true;
 }
 
 bool LogManager::AppendFromLeader(int prev_log_index, int prev_log_term,

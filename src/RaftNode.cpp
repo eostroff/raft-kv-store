@@ -144,6 +144,11 @@ void RaftNode::HandlePeerConnection(std::unique_ptr<ListenSocket> socket) {
 			if (ae.IsValid()) {
 				HandleAppendEntries(stub, ae);
 			}
+		} else if (rpc_type == RPC_CLIENT_COMMAND) {
+			ClientCommand cmd = stub.ReceiveClientCommand();
+			if (cmd.IsValid()) {
+				HandleClientCommand(stub, cmd);
+			}
 		} else {
 			std::cerr << "[Node " << node_id << "] Unknown RPC type: " << rpc_type << std::endl;
 			break;
@@ -214,11 +219,68 @@ void RaftNode::HandleAppendEntries(NodeStub &stub, AppendEntries &ae) {
 
 		if (success && ae.GetLeaderCommit() > commit_index) {
 			commit_index = std::min(ae.GetLeaderCommit(), log_manager.LastIndex());
+			ApplyCommittedEntries();
 		}
 	}
 
 	reply.SetReply(current_term, success, node_id);
 	stub.SendAppendEntriesReply(reply);
+}
+
+void RaftNode::HandleClientCommand(NodeStub &stub, ClientCommand &cmd) {
+	ClientReply reply;
+
+	if (cmd.GetOp() == CLIENT_OP_GET) {
+		std::lock_guard<std::mutex> lock(mu);
+		auto it = kv_store.find(cmd.GetKey());
+		if (it == kv_store.end()) {
+			reply.SetReply(CLIENT_STATUS_NOT_FOUND, 0, "", "", "key not found");
+		} else {
+			reply.SetReply(CLIENT_STATUS_OK, 0, "", it->second, "ok");
+		}
+		stub.SendClientReply(reply);
+		return;
+	}
+
+	int cmd_type = (cmd.GetOp() == CLIENT_OP_PUT) ? CMD_PUT : CMD_DELETE;
+	int entry_index = -1;
+	int start_term = 0;
+
+	{
+		std::lock_guard<std::mutex> lock(mu);
+		if (state != LEADER) {
+			PeerInfo leader = FindPeerById(leader_id);
+			reply.SetReply(CLIENT_STATUS_NOT_LEADER, leader.port, leader.ip, "", "not leader");
+			stub.SendClientReply(reply);
+			return;
+		}
+
+		start_term = current_term;
+		entry_index = log_manager.Append(current_term, cmd_type, cmd.GetKey(), cmd.GetValue());
+	}
+
+	for (int waited_ms = 0; waited_ms < 3000 && running; waited_ms += 20) {
+		{
+			std::lock_guard<std::mutex> lock(mu);
+			if (state != LEADER || current_term != start_term) {
+				PeerInfo leader = FindPeerById(leader_id);
+				reply.SetReply(CLIENT_STATUS_NOT_LEADER, leader.port, leader.ip, "", "leadership changed");
+				stub.SendClientReply(reply);
+				return;
+			}
+
+			if (commit_index >= entry_index) {
+				ApplyCommittedEntries();
+				reply.SetReply(CLIENT_STATUS_OK, 0, "", "", "ok");
+				stub.SendClientReply(reply);
+				return;
+			}
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	}
+
+	reply.SetReply(CLIENT_STATUS_ERROR, 0, "", "", "commit timeout");
+	stub.SendClientReply(reply);
 }
 
 // ============================================================
@@ -252,8 +314,6 @@ void RaftNode::StartElection() {
 		vote_threads.emplace_back([&, peer]() {
 			RaftStub stub;
 			if (!stub.Init(peer.ip, peer.port)) {
-				std::cerr << "[Node " << node_id << "] Failed to connect to peer "
-					<< peer.id << " at " << peer.ip << ":" << peer.port << std::endl;
 				return;
 			}
 
@@ -314,7 +374,7 @@ void RaftNode::BecomeLeader() {
 	next_index.assign(peers.size(), last_index + 1);
 	match_index.assign(peers.size(), 0);
 
-	int noop_index = log_manager.Append(current_term, next_command_id++);
+	int noop_index = log_manager.Append(current_term, CMD_NOOP);
 	std::cout << "[Node " << node_id << "] Appended leader no-op at index "
 		<< noop_index << " term " << current_term << std::endl;
 
@@ -344,7 +404,24 @@ void RaftNode::MaybeAdvanceCommitIndex() {
 		}
 		if (replicated >= majority) {
 			commit_index = idx;
+			ApplyCommittedEntries();
 			return;
+		}
+	}
+}
+
+void RaftNode::ApplyCommittedEntries() {
+	while (last_applied < commit_index) {
+		last_applied++;
+		LogEntry e;
+		if (!log_manager.GetEntry(last_applied, e)) {
+			break;
+		}
+
+		if (e.command == CMD_PUT) {
+			kv_store[e.key] = e.value;
+		} else if (e.command == CMD_DELETE) {
+			kv_store.erase(e.key);
 		}
 	}
 }
@@ -451,4 +528,23 @@ std::string RaftNode::StateStr() {
 		case LEADER:    return "LEADER";
 		default:        return "UNKNOWN";
 	}
+}
+
+PeerInfo RaftNode::FindPeerById(int id) const {
+	if (id == node_id) {
+		PeerInfo me;
+		me.id = node_id;
+		me.ip = "127.0.0.1";
+		me.port = port;
+		return me;
+	}
+	for (size_t i = 0; i < peers.size(); ++i) {
+		if (peers[i].id == id) {
+			return peers[i];
+		}
+	}
+	PeerInfo empty;
+	empty.id = -1;
+	empty.port = 0;
+	return empty;
 }

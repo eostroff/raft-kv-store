@@ -8,6 +8,7 @@
 #include <random>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include "Messages.h"
@@ -50,6 +51,7 @@ private:
 	std::vector<int> next_index;
 	std::vector<int> match_index;
 	int next_command_id;
+	std::unordered_map<std::string, std::string> kv_store;
 
 	// ---- Synchronization ----
 	std::mutex mu;
@@ -87,12 +89,15 @@ private:
 	// RPC handlers (called from HandlePeerConnection)
 	void HandleRequestVote(NodeStub &stub, RequestVote &rv);
 	void HandleAppendEntries(NodeStub &stub, AppendEntries &ae);
+	void HandleClientCommand(NodeStub &stub, ClientCommand &cmd);
 
 	// Election logic
 	void StartElection();
 	void BecomeFollower(int term);
 	void BecomeLeader();
 	void MaybeAdvanceCommitIndex();
+	void ApplyCommittedEntries();
+	PeerInfo FindPeerById(int id) const;
 
 	// Helper: get state as string for logging
 	std::string StateStr();

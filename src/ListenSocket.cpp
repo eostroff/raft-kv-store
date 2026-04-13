@@ -6,6 +6,7 @@
 #include <netdb.h>
 #include <netinet/tcp.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #include "ListenSocket.h"
 
@@ -27,6 +28,13 @@ bool ListenSocket::Init(int port) {
 		return false;
 	}
 
+	int opt = 1;
+	if (setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+		perror("ERROR: failed to set SO_REUSEADDR");
+		close(fd_);
+		return false;
+	}
+
 	memset(&addr, '\0', sizeof(addr));
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = INADDR_ANY;
@@ -34,10 +42,15 @@ bool ListenSocket::Init(int port) {
 
 	if ((bind(fd_, (struct sockaddr *) &addr, sizeof(addr))) < 0) {
 		perror("ERROR: failed to bind");
+		close(fd_);
 		return false;
 	}
 
-	listen(fd_, 8);
+	if (listen(fd_, 8) < 0) {
+		perror("ERROR: failed to listen");
+		close(fd_);
+		return false;
+	}
 
 	is_initialized_ = true;
 	return true;

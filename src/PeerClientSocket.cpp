@@ -4,6 +4,7 @@
 #include <netdb.h>
 #include <netinet/tcp.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #include "PeerClientSocket.h"
 
@@ -24,7 +25,8 @@ int PeerClientSocket::Init(std::string ip, int port) {
 	addr.sin_port = htons(port);
 
 	if ((connect(fd_, (struct sockaddr *) &addr, sizeof(addr))) < 0) {
-		perror("ERROR: failed to connect");
+		// perror("ERROR: failed to connect");
+		close(fd_);
 		return 0;
 	}
 	is_initialized_ = true;
